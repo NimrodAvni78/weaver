@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 # Unreleased
 
+- Cache version-pinned Git registries on disk and reuse them across invocations, instead of re-cloning into a throwaway temp dir every run. Opt in via `WEAVER_CACHE_DIR` / `WEAVER_REGISTRY_CACHE`; `WEAVER_OFFLINE` turns a cache miss into a hard error (and wins over refresh) and `WEAVER_REGISTRY_REFRESH` forces a re-fetch. Only sources pinned with `@<refspec>` are cached; entry population is concurrency-safe (clone into private staging, then atomic rename), so parallel processes never observe a partial entry. (Addresses: [#267](https://github.com/open-telemetry/weaver/issues/267))
 - Live-check: (Fixes: [#1614](https://github.com/open-telemetry/weaver/issues/1614)) add `[[live-check.finding_level_overrides]]` to rewrite a finding's level instead of dropping it (e.g. treat `undefined_enum_variant` as a violation), scoped by the same `signal_type`/`sample_names` rules as `finding_filters`. ([#1625](https://github.com/open-telemetry/weaver/pull/1625) by @jerbly)
 - Change v2 refinement attribute precedence so `ref_group` details win over inherited attributes. ([#1604](https://github.com/open-telemetry/weaver/pull/1604) by @lmolkova)
 - Make `deprecated.note` optional for `{reason: renamed}` - inferred from `renamed_to`. ([#1622](https://github.com/open-telemetry/weaver/pull/1622) by @lmolkova)
