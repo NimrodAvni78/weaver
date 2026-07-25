@@ -76,7 +76,6 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::env;
 use std::fmt::Display;
 use std::fs::{create_dir_all, File};
 use std::io;
@@ -84,7 +83,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tempfile::TempDir;
 use ureq::config::{Config, RedirectAuthHeaders};
 use ureq::tls::{RootCerts, TlsConfig};
@@ -295,23 +294,7 @@ fn is_commit_sha(s: &str) -> bool {
     gix::ObjectId::from_hex(s.as_bytes()).is_ok()
 }
 
-/// Reads an environment variable as a boolean flag.
-///
-/// Returns `Some(true)` for `1`/`true`/`yes`/`on` (case-insensitive), `Some(false)`
-/// for any other non-empty value (e.g. `0`/`false`), and `None` when the variable
-/// is unset or set to an empty/whitespace-only string. Treating empty as unset
-/// mirrors the handling of `WEAVER_CACHE_DIR`, so an exported-but-empty flag from
-/// a CI template does not accidentally disable the cache.
-fn env_flag(name: &str) -> Option<bool> {
-    env::var(name)
-        .ok()
-        .map(|v| v.trim().to_ascii_lowercase())
-        .filter(|v| !v.is_empty())
-        .map(|v| matches!(v.as_str(), "1" | "true" | "yes" | "on"))
-}
-
-/// Configuration for the persistent, ref-keyed Git registry cache, derived from
-/// the environment.
+/// Configuration for the persistent, ref-keyed Git registry cache.
 ///
 /// The cache lets weaver clone a version-pinned semantic-convention registry (or
 /// a pinned `dependencies[]` entry in a registry manifest) **once** and reuse it
@@ -320,18 +303,9 @@ fn env_flag(name: &str) -> Option<bool> {
 /// weaver processes resolve the same pinned registry — e.g. one container per
 /// integration-test suite.
 ///
-/// Controlled by:
-/// - `WEAVER_CACHE_DIR`: absolute path of the cache root. Setting it enables the
-///   cache (unless `WEAVER_REGISTRY_CACHE` is explicitly falsy).
-/// - `WEAVER_REGISTRY_CACHE`: `1`/`true`/`yes`/`on` enables the cache at the
-///   default location (`~/.weaver/cache`); `0`/`false` disables it even when
-///   `WEAVER_CACHE_DIR` is set.
-/// - `WEAVER_OFFLINE`: when truthy, a cache miss for a pinned source is a hard
-///   error ([`Error::RegistryOffline`]) instead of a network fetch.
-/// - `WEAVER_REGISTRY_REFRESH`: when truthy, re-fetch and atomically replace a
-///   cached entry even on a hit — for the rare case of a moving tag or branch.
-///
-/// When `root` is `None` the cache is disabled and git sources are cloned into a
+/// It is populated once at startup from the CLI (`--registry-cache-dir`,
+/// `--offline`, `--registry-cache-refresh`) via [`configure_git_cache`]. When
+/// `root` is `None` the cache is disabled and git sources are cloned into a
 /// throwaway temporary directory (the historical behavior), so the default
 /// experience is unchanged unless a user opts in.
 #[derive(Debug, Clone, Default)]
@@ -344,32 +318,36 @@ struct GitCacheConfig {
     refresh: bool,
 }
 
-impl GitCacheConfig {
-    /// Build a cache configuration from weaver's environment variables.
-    fn from_env() -> Self {
-        let cache_dir = env::var("WEAVER_CACHE_DIR").ok().filter(|s| !s.is_empty());
-        let enabled = match env_flag("WEAVER_REGISTRY_CACHE") {
-            Some(explicit) => explicit,
-            None => cache_dir.is_some(),
-        };
+/// Process-wide git-registry cache configuration, set once at startup by the CLI
+/// layer via [`configure_git_cache`]. Defaults to disabled (`root: None`).
+static GIT_CACHE_CONFIG: Lazy<RwLock<GitCacheConfig>> =
+    Lazy::new(|| RwLock::new(GitCacheConfig::default()));
 
-        let root = if enabled {
-            match cache_dir {
-                Some(dir) => Some(PathBuf::from(dir)),
-                // Fall back to the default location; if the home directory can't
-                // be resolved, leave the cache disabled rather than fail.
-                None => dirs::home_dir().map(|home| home.join(".weaver/cache")),
-            }
-        } else {
-            None
-        };
+/// Configure the persistent, ref-keyed Git registry cache for this process.
+///
+/// Intended to be called once from the CLI layer, mirroring
+/// [`enable_git_credentials`]. Passing `cache_dir = None` leaves the cache
+/// disabled (the default), so git registries are cloned into a throwaway
+/// temporary directory. `offline` turns a cache miss for a pinned source into an
+/// [`Error::RegistryOffline`] instead of a network fetch, and `refresh` forces a
+/// re-fetch of an already-cached entry (ignored when `offline` is set).
+pub fn configure_git_cache(cache_dir: Option<PathBuf>, offline: bool, refresh: bool) {
+    let mut cfg = GIT_CACHE_CONFIG
+        .write()
+        .expect("git cache config lock poisoned");
+    *cfg = GitCacheConfig {
+        root: cache_dir,
+        offline,
+        refresh,
+    };
+}
 
-        Self {
-            root,
-            offline: env_flag("WEAVER_OFFLINE").unwrap_or(false),
-            refresh: env_flag("WEAVER_REGISTRY_REFRESH").unwrap_or(false),
-        }
-    }
+/// Returns a snapshot of the current git-registry cache configuration.
+fn git_cache_config() -> GitCacheConfig {
+    GIT_CACHE_CONFIG
+        .read()
+        .expect("git cache config lock poisoned")
+        .clone()
 }
 
 /// Derives a filesystem-safe cache directory name for a pinned Git source.
@@ -812,7 +790,7 @@ impl VirtualDirectory {
         refspec: &Option<String>,
         vdir_path: String,
     ) -> Result<Self, Error> {
-        let cache = GitCacheConfig::from_env();
+        let cache = git_cache_config();
         // Only pinned sources are cacheable: a bare URL with no refspec tracks a
         // moving default branch, so caching it could silently serve stale data.
         match (cache.root.as_ref(), refspec.as_ref()) {

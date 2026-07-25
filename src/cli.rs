@@ -46,6 +46,26 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
 
+    /// Directory in which to cache version-pinned Git registries so they are
+    /// cloned once and reused across invocations, instead of re-cloned on every
+    /// command. Only sources pinned with `@<refspec>` (tag, branch, or commit)
+    /// are cached. When omitted, git registries are cloned into a throwaway
+    /// temporary directory (the default behavior).
+    #[arg(long, global = true, value_name = "PATH")]
+    pub registry_cache_dir: Option<PathBuf>,
+
+    /// Do not access the network to resolve a Git registry: a cache miss for a
+    /// pinned source becomes an error instead of a clone. Only meaningful with
+    /// `--registry-cache-dir`.
+    #[arg(long, global = true)]
+    pub offline: bool,
+
+    /// Re-fetch and atomically replace a cached Git registry entry even on a
+    /// cache hit (for a moving tag or branch). Ignored when `--offline` is set.
+    /// Only meaningful with `--registry-cache-dir`.
+    #[arg(long, global = true)]
+    pub registry_cache_refresh: bool,
+
     /// List of supported commands
     #[command(subcommand)]
     pub command: Option<Commands>,

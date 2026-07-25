@@ -144,31 +144,31 @@ To avoid it, weaver can cache a **version-pinned** Git registry in a shared
 directory and reuse it across invocations. A source is considered pinned when it
 carries an explicit `@<refspec>` (a tag, branch, or commit); a bare URL that
 tracks a moving default branch is never cached, so it can never serve stale
-content. The cache is controlled entirely by environment variables:
+content. The cache is controlled by these global CLI flags (available on every
+subcommand):
 
-| Variable | Effect |
+| Flag | Effect |
 | --- | --- |
-| `WEAVER_CACHE_DIR` | Absolute path of the cache root. Setting it enables the cache. |
-| `WEAVER_REGISTRY_CACHE` | `1`/`true`/`yes`/`on` enables the cache at the default location (`~/.weaver/cache`); `0`/`false` disables it even when `WEAVER_CACHE_DIR` is set. |
-| `WEAVER_OFFLINE` | When truthy, a cache miss for a pinned source is a hard error instead of a network fetch — for deterministic CI runs. |
-| `WEAVER_REGISTRY_REFRESH` | When truthy, re-fetch and atomically replace a cached entry even on a hit — for the rare case of a moving tag or branch. |
+| `--registry-cache-dir <PATH>` | Cache root directory. Providing it enables the cache; omitting it keeps the default throwaway-clone behavior. |
+| `--offline` | A cache miss for a pinned source is a hard error instead of a network fetch — for deterministic CI runs. |
+| `--registry-cache-refresh` | Re-fetch and atomically replace a cached entry even on a hit — for the rare case of a moving tag or branch. |
 
 Cache entries are keyed by `(url, refspec)`, so registries that differ only by
 sub-folder share a single clone. Population is concurrency-safe: the clone is
 staged in a private directory and then atomically moved into place, so parallel
 `weaver` processes never observe a half-populated entry and a lost race simply
-reuses the winner's clone. `WEAVER_OFFLINE` takes precedence over
-`WEAVER_REGISTRY_REFRESH` (offline never re-fetches). Prefer running a refresh
+reuses the winner's clone. `--offline` takes precedence over
+`--registry-cache-refresh` (offline never re-fetches). Prefer running a refresh
 while no other `weaver` process is reading the same cache entry.
 
 ```bash
 # Populate (or reuse) the cache, then run fully offline against the pinned copy.
-export WEAVER_CACHE_DIR=/path/to/weaver-cache
-weaver registry check   -r "https://github.com/open-telemetry/semantic-conventions.git@v1.41.0[model]"
-WEAVER_OFFLINE=1 \
-weaver registry live-check --registry "https://github.com/open-telemetry/semantic-conventions.git@v1.41.0[model]"
+weaver --registry-cache-dir /path/to/weaver-cache \
+  registry check -r "https://github.com/open-telemetry/semantic-conventions.git@v1.41.0[model]"
+weaver --registry-cache-dir /path/to/weaver-cache --offline \
+  registry live-check --registry "https://github.com/open-telemetry/semantic-conventions.git@v1.41.0[model]"
 ```
 
-In CI, point `WEAVER_CACHE_DIR` at a cached/restored directory keyed on the
-pinned version, and set `WEAVER_OFFLINE=1` so a cache miss fails loudly rather
-than silently reaching the network.
+In CI, point `--registry-cache-dir` at a cached/restored directory keyed on the
+pinned version, and add `--offline` so a cache miss fails loudly rather than
+silently reaching the network.
