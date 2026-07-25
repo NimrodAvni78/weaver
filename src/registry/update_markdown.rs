@@ -241,6 +241,9 @@ mod tests {
             future: false,
             allow_git_credentials: false,
             config: None,
+            registry_cache_dir: None,
+            offline: false,
+            registry_cache_refresh: false,
             command: Some(Commands::Registry(RegistryCommand {
                 command: RegistrySubCommand::UpdateMarkdown(RegistryUpdateMarkdownArgs {
                     markdown_dir: Some("data/update_markdown/markdown".to_owned()),
@@ -285,6 +288,9 @@ mod tests {
             future: false,
             allow_git_credentials: false,
             config: None,
+            registry_cache_dir: None,
+            offline: false,
+            registry_cache_refresh: false,
             command: Some(Commands::Registry(RegistryCommand {
                 command: RegistrySubCommand::UpdateMarkdown(RegistryUpdateMarkdownArgs {
                     markdown_dir: Some("data/update_markdown/markdown".to_owned()),
@@ -328,6 +334,9 @@ mod tests {
             future: false,
             allow_git_credentials: false,
             config: None,
+            registry_cache_dir: None,
+            offline: false,
+            registry_cache_refresh: false,
             command: Some(Commands::Registry(RegistryCommand {
                 command: RegistrySubCommand::UpdateMarkdown(RegistryUpdateMarkdownArgs {
                     markdown_dir: Some(markdown_dir.to_owned()),
@@ -399,6 +408,9 @@ mod tests {
             future: false,
             allow_git_credentials: false,
             config: None,
+            registry_cache_dir: None,
+            offline: false,
+            registry_cache_refresh: false,
             command: Some(Commands::Registry(RegistryCommand {
                 command: RegistrySubCommand::UpdateMarkdown(RegistryUpdateMarkdownArgs {
                     markdown_dir: Some(markdown_dir.to_str().unwrap().to_owned()),
@@ -428,6 +440,9 @@ mod tests {
             future: false,
             allow_git_credentials: false,
             config: None,
+            registry_cache_dir: None,
+            offline: false,
+            registry_cache_refresh: false,
             command: Some(Commands::Registry(RegistryCommand {
                 command: RegistrySubCommand::UpdateMarkdown(RegistryUpdateMarkdownArgs {
                     markdown_dir: Some(markdown_dir.to_str().unwrap().to_owned()),

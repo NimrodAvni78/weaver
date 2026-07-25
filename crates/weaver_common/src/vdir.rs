@@ -2162,19 +2162,52 @@ mod tests {
         assert!(path.exists(), "cached registry must not be deleted on drop");
     }
 
+    /// Creates a tiny local git repository containing `model/general.yaml` tagged
+    /// `v0.0.1`, so the cache populate path can be exercised via a `file://` URL
+    /// with no network access (and fast enough for coverage instrumentation).
+    /// Returns the repo dir (kept alive by the caller) and its `file://` URL.
+    fn make_local_git_repo() -> (tempfile::TempDir, String) {
+        use std::process::Command;
+
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .expect("failed to run git")
+                .success();
+            assert!(ok, "git {args:?} failed");
+        };
+
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        std::fs::create_dir_all(repo.path().join("model")).unwrap();
+        std::fs::write(repo.path().join("model/general.yaml"), "groups: []\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "init"]);
+        git(&["tag", "v0.0.1"]);
+
+        let url = format!("file://{}", repo.path().display());
+        (repo, url)
+    }
+
     #[test]
     fn test_git_cache_populates_and_reuses() {
         use super::git_cache_key;
 
+        let (_repo, url) = make_local_git_repo();
+        let refspec = "v0.0.1";
         let cache = tempfile::tempdir().unwrap();
-        let url = "https://github.com/open-telemetry/semantic-conventions.git";
-        let refspec = "v1.26.0";
-        let entry = cache.path().join("git").join(git_cache_key(url, refspec));
+        let entry = cache.path().join("git").join(git_cache_key(&url, refspec));
         assert!(!entry.exists());
 
-        // First call populates the cache from the network.
+        // First call populates the cache by cloning the (local) repo.
         let first = VirtualDirectory::try_from_git_url_cached(
-            url,
+            &url,
             &Some("model".to_owned()),
             refspec,
             "vdir".to_owned(),
@@ -2191,9 +2224,9 @@ mod tests {
         assert!(entry.exists());
         assert!(first_path.exists());
 
-        // Second call is served from the cache with no network access.
+        // Second call is served from the cache with no fetch.
         let second = VirtualDirectory::try_from_git_url_cached(
-            url,
+            &url,
             &Some("model".to_owned()),
             refspec,
             "vdir".to_owned(),
@@ -2203,6 +2236,53 @@ mod tests {
         )
         .expect("second call should hit the cache offline");
         assert_eq!(second.path(), first_path);
+    }
+
+    #[test]
+    fn test_git_cache_refresh_replaces_entry() {
+        use super::git_cache_key;
+
+        let (_repo, url) = make_local_git_repo();
+        let refspec = "v0.0.1";
+        let cache = tempfile::tempdir().unwrap();
+
+        // Pre-seed a stale entry under the real cache key.
+        let entry = cache.path().join("git").join(git_cache_key(&url, refspec));
+        let model = entry.join("model");
+        std::fs::create_dir_all(&model).unwrap();
+        std::fs::write(model.join("general.yaml"), "stale: true\n").unwrap();
+
+        // Refresh re-clones and atomically replaces the stale entry.
+        let refreshed = VirtualDirectory::try_from_git_url_cached(
+            &url,
+            &Some("model".to_owned()),
+            refspec,
+            "vdir".to_owned(),
+            cache.path(),
+            false, // offline
+            true,  // refresh
+        )
+        .expect("refresh should re-clone and replace the entry");
+
+        assert_eq!(
+            std::fs::read_to_string(refreshed.path().join("general.yaml")).unwrap(),
+            "groups: []\n",
+            "refresh must replace the stale content with the freshly cloned copy"
+        );
+        // No retired/staging siblings should be left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(cache.path().join("git"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let n = e.file_name();
+                let n = n.to_string_lossy();
+                n.starts_with(".old-") || n.starts_with(".staging-")
+            })
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "refresh left temp dirs: {leftovers:?}"
+        );
     }
 
     #[test]

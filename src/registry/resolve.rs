@@ -125,6 +125,9 @@ mod tests {
             future: false,
             allow_git_credentials: false,
             config: None,
+            registry_cache_dir: None,
+            offline: false,
+            registry_cache_refresh: false,
             command: Some(Commands::Registry(RegistryCommand {
                 command: RegistrySubCommand::Resolve(RegistryResolveArgs {
                     registry: RegistryArgs {
@@ -156,6 +159,9 @@ mod tests {
             future: false,
             allow_git_credentials: false,
             config: None,
+            registry_cache_dir: None,
+            offline: false,
+            registry_cache_refresh: false,
             command: Some(Commands::Registry(RegistryCommand {
                 command: RegistrySubCommand::Resolve(RegistryResolveArgs {
                     registry: RegistryArgs {
