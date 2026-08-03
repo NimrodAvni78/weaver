@@ -138,6 +138,19 @@ pub struct RegistryLiveCheckArgs {
     #[config(default = "violation")]
     fail_on: Option<FailOnLevel>,
 
+    /// Minimum registry coverage (0.0–1.0). Exit non-zero when
+    /// `statistics.registry_coverage` is below this value.
+    #[arg(long)]
+    #[config]
+    fail_on_coverage_below: Option<f32>,
+
+    /// Restrict the coverage denominator to attributes/metrics/events whose
+    /// dotted name equals or is prefixed by one of these comma-separated
+    /// namespaces (e.g. `--coverage-scope http,db`).
+    #[arg(long, value_delimiter = ',')]
+    #[config]
+    coverage_scope: Option<Vec<String>>,
+
     /// Path to save generated artifacts. Use "none" to suppress output,
     /// "http" to send as the /stop response.
     #[arg(short, long)]
@@ -250,6 +263,16 @@ pub(crate) fn command(
              Pass --fail-on=none to suppress this warning.",
             config.fail_on
         ));
+    }
+
+    // Coverage stats are Cumulative-only; --no-stats makes the coverage gate a
+    // silent no-op, so warn just like the --fail-on guard above.
+    if config.no_stats && config.fail_on_coverage_below.is_some() {
+        log_warn(
+            "--no-stats disables statistics; --fail-on-coverage-below cannot be \
+             enforced. The command will exit 0 regardless of coverage."
+                .to_owned(),
+        );
     }
 
     let input_source = InputSource::from(config.input_source.clone());
@@ -381,10 +404,14 @@ pub(crate) fn command(
         config.no_stream
     };
 
+    let coverage_scope = config.coverage_scope.as_deref().unwrap_or(&[]);
     let mut stats = if config.no_stats {
         LiveCheckStatistics::Disabled(DisabledStatistics)
     } else {
-        LiveCheckStatistics::Cumulative(CumulativeStatistics::new(&live_checker.registry))
+        LiveCheckStatistics::Cumulative(CumulativeStatistics::new_with_scope(
+            &live_checker.registry,
+            coverage_scope,
+        ))
     };
 
     let mut samples = Vec::new();
@@ -417,6 +444,17 @@ pub(crate) fn command(
     if let Some(threshold) = config.fail_on.as_finding_threshold() {
         if stats.should_fail(threshold) {
             exit_code = 1;
+        }
+    }
+
+    // Coverage gate: fail when the finalized registry coverage is below the
+    // configured minimum. Disabled stats report no coverage, so the gate is a
+    // no-op then; the startup check below warns about that combination.
+    if let Some(min_coverage) = config.fail_on_coverage_below {
+        if let Some(coverage) = stats.registry_coverage() {
+            if coverage < min_coverage {
+                exit_code = 1;
+            }
         }
     }
 

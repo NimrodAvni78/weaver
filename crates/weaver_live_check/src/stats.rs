@@ -45,13 +45,39 @@ pub struct CumulativeStatistics {
     pub(crate) seen_non_registry_events: HashMap<String, usize>,
     /// Fraction of the registry covered by the attributes, metrics, and events
     pub(crate) registry_coverage: f32,
+    /// Per-namespace coverage fraction, keyed by the namespace passed via
+    /// `--coverage-scope`. Empty when no scope was requested.
+    pub(crate) namespace_coverage: HashMap<String, f32>,
+    /// The namespaces the coverage denominator is restricted to. Empty means
+    /// the whole registry is counted. Not serialized into the report.
+    #[serde(skip)]
+    pub(crate) coverage_scope: Vec<String>,
+}
+
+/// Returns true if `name` equals one of the `scope` namespaces or is nested
+/// under one (dotted prefix). An empty `scope` matches everything.
+fn in_scope(name: &str, scope: &[String]) -> bool {
+    scope.is_empty()
+        || scope
+            .iter()
+            .any(|ns| name == ns || name.starts_with(&format!("{ns}.")))
 }
 
 impl CumulativeStatistics {
-    /// Create a new CumulativeStatistics initialized with registry structure
+    /// Create a new CumulativeStatistics initialized with registry structure,
+    /// counting the whole registry towards coverage.
     #[must_use]
     pub fn new(registry: &VersionedRegistry) -> Self {
-        let (seen_attributes, seen_metrics, seen_events) = Self::extract_registry_items(registry);
+        Self::new_with_scope(registry, &[])
+    }
+
+    /// Create a new CumulativeStatistics whose coverage denominator is
+    /// restricted to registry items in one of the `scope` namespaces. An empty
+    /// `scope` counts the whole registry (equivalent to [`Self::new`]).
+    #[must_use]
+    pub fn new_with_scope(registry: &VersionedRegistry, scope: &[String]) -> Self {
+        let (seen_attributes, seen_metrics, seen_events) =
+            Self::extract_registry_items(registry, scope);
 
         CumulativeStatistics {
             total_entities: 0,
@@ -69,12 +95,15 @@ impl CumulativeStatistics {
             seen_registry_events: seen_events,
             seen_non_registry_events: HashMap::new(),
             registry_coverage: 0.0,
+            namespace_coverage: HashMap::new(),
+            coverage_scope: scope.to_vec(),
         }
     }
 
-    /// Extract registry items for tracking
+    /// Extract registry items for tracking, keeping only items in `scope`.
     fn extract_registry_items(
         registry: &VersionedRegistry,
+        scope: &[String],
     ) -> (
         HashMap<String, usize>,
         HashMap<String, usize>,
@@ -88,36 +117,42 @@ impl CumulativeStatistics {
             VersionedRegistry::V1(reg) => {
                 for group in &reg.groups {
                     for attribute in &group.attributes {
-                        if attribute.deprecated.is_none() {
+                        if attribute.deprecated.is_none() && in_scope(&attribute.name, scope) {
                             let _ = seen_attributes.insert(attribute.name.clone(), 0);
                         }
                     }
                     if group.r#type == GroupType::Metric && group.deprecated.is_none() {
                         if let Some(metric_name) = &group.metric_name {
-                            let _ = seen_metrics.insert(metric_name.clone(), 0);
+                            if in_scope(metric_name, scope) {
+                                let _ = seen_metrics.insert(metric_name.clone(), 0);
+                            }
                         }
                     }
                     if group.r#type == GroupType::Event && group.deprecated.is_none() {
                         if let Some(event_name) = &group.name {
-                            let _ = seen_events.insert(event_name.clone(), 0);
+                            if in_scope(event_name, scope) {
+                                let _ = seen_events.insert(event_name.clone(), 0);
+                            }
                         }
                     }
                 }
             }
             VersionedRegistry::V2(reg) => {
                 for attribute in &reg.registry.attributes {
-                    if attribute.common.deprecated.is_none() {
+                    if attribute.common.deprecated.is_none() && in_scope(&attribute.key, scope) {
                         let _ = seen_attributes.insert(attribute.key.clone(), 0);
                     }
                 }
                 for metric in &reg.registry.metrics {
-                    if metric.common.deprecated.is_none() {
-                        let _ = seen_metrics.insert(metric.name.to_string(), 0);
+                    let metric_name = metric.name.to_string();
+                    if metric.common.deprecated.is_none() && in_scope(&metric_name, scope) {
+                        let _ = seen_metrics.insert(metric_name, 0);
                     }
                 }
                 for event in &reg.registry.events {
-                    if event.common.deprecated.is_none() {
-                        let _ = seen_events.insert(event.name.to_string(), 0);
+                    let event_name = event.name.to_string();
+                    if event.common.deprecated.is_none() && in_scope(&event_name, scope) {
+                        let _ = seen_events.insert(event_name, 0);
                     }
                 }
             }
@@ -252,6 +287,34 @@ impl CumulativeStatistics {
         } else {
             self.registry_coverage = 0.0;
         }
+
+        // Per-namespace coverage, one bucket per requested scope namespace.
+        self.namespace_coverage.clear();
+        for ns in &self.coverage_scope {
+            let single = std::slice::from_ref(ns);
+            let mut seen = 0;
+            let mut total = 0;
+            for map in [
+                &self.seen_registry_attributes,
+                &self.seen_registry_metrics,
+                &self.seen_registry_events,
+            ] {
+                for (name, count) in map {
+                    if in_scope(name, single) {
+                        total += 1;
+                        if *count > 0 {
+                            seen += 1;
+                        }
+                    }
+                }
+            }
+            let coverage = if total > 0 {
+                (seen as f32) / (total as f32)
+            } else {
+                0.0
+            };
+            let _ = self.namespace_coverage.insert(ns.clone(), coverage);
+        }
     }
 }
 
@@ -332,6 +395,16 @@ impl LiveCheckStatistics {
         match self {
             Self::Cumulative(stats) => stats.should_fail(threshold),
             Self::Disabled(_) => false,
+        }
+    }
+
+    /// The finalized registry coverage fraction (0.0–1.0), or `None` when stats
+    /// are disabled. Only meaningful after [`Self::finalize`].
+    #[must_use]
+    pub fn registry_coverage(&self) -> Option<f32> {
+        match self {
+            Self::Cumulative(stats) => Some(stats.registry_coverage),
+            Self::Disabled(_) => None,
         }
     }
 
