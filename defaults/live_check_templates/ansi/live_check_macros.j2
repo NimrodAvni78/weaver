@@ -33,6 +33,12 @@
 
 {{ ("Registry coverage") | ansi_blue | ansi_bold }}
   - total seen: {{ (statistics.registry_coverage * 100) | round(2) }}%
+{% if statistics.namespace_coverage %}
+  - by namespace:
+{% for key, value in statistics.namespace_coverage.items() %}
+    - {{ key }}: {{ (value * 100) | round(2) }}%
+{% endfor %}
+{% endif %}
 {% endif %}
 {% endmacro %}
 

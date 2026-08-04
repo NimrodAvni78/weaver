@@ -114,6 +114,16 @@ pub struct LiveCheckConfig {
     /// level or higher fail the run. Use `none` to never fail.
     pub fail_on: FailOnLevel,
 
+    /// Minimum registry coverage (0.0–1.0). When set, the run exits non-zero if
+    /// `statistics.registry_coverage` is below this value. Unset disables the
+    /// coverage gate.
+    pub fail_on_coverage_below: Option<f32>,
+
+    /// Restrict the coverage denominator to registry attributes, metrics, and
+    /// events whose dotted name equals or is prefixed by one of these
+    /// namespaces (e.g. `["http", "db"]`). Unset counts the whole registry.
+    pub coverage_scope: Option<Vec<String>>,
+
     /// Path to the directory where the generated artifacts will be saved.
     /// `none` disables all template output rendering.
     /// `http` sends the report as the response to the `/stop` request on the admin port.
@@ -149,6 +159,8 @@ impl Default for LiveCheckConfig {
             no_stream: false,
             no_stats: false,
             fail_on: FailOnLevel::default(),
+            fail_on_coverage_below: None,
+            coverage_scope: None,
             output: None,
             advice_policies: None,
             advice_data: None,
