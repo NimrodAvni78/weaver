@@ -110,10 +110,10 @@ pub(crate) fn command(
         JsonSchemaType::Diff => schema_for!(weaver_version::schema_changes::SchemaChanges),
         JsonSchemaType::DiffV2 => schema_for!(weaver_version::v2::SchemaChanges),
         JsonSchemaType::DefinitionManifestV2 => {
-            schema_for!(weaver_semconv::manifest::DefinitionRegistryManifest)
+            schema_for!(weaver_semconv::v2::manifest::DefinitionRegistryManifest)
         }
         JsonSchemaType::PublicationManifestV2 => {
-            schema_for!(weaver_semconv::manifest::PublicationRegistryManifest)
+            schema_for!(weaver_semconv::v2::manifest::PublicationRegistryManifest)
         }
         JsonSchemaType::PolicyFinding => schema_for!(weaver_checker::PolicyFinding),
         JsonSchemaType::WeaverConfig => schema_for!(WeaverConfigSchema),
@@ -160,6 +160,9 @@ mod tests {
                 future: false,
                 allow_git_credentials: false,
                 config: None,
+                registry_cache_dir: None,
+                registry_cache_offline: false,
+                registry_cache_refresh: false,
                 command: Some(Commands::Registry(RegistryCommand {
                     command: RegistrySubCommand::JsonSchema(RegistryJsonSchemaArgs {
                         json_schema: json_schema_type.clone(),
